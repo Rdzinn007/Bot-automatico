@@ -1,0 +1,698 @@
+// Bot de Atendimento Avançado para Empresa de Placas de Gesso 3D
+// Inclui: sistema de pagamento, rastreamento de pedidos e integração multicanal
+
+class BotAtendimentoGesso3D {
+  constructor() {
+    this.dadosCliente = {
+      nome: "",
+      email: "",
+      telefone: "",
+      endereco: "",
+      cep: "",
+      cidade: "",
+      estado: "",
+      historicoPedidos: []
+    };
+    this.pedidoAtual = {
+      id: this.gerarIdPedido(),
+      produtos: [],
+      quantidades: {},
+      orcamento: false,
+      instalacao: false,
+      dataEntrega: null,
+      status: "novo",
+      formaPagamento: null,
+      valorTotal: 0,
+      desconto: 0,
+      freteValor: 0,
+      codigoRastreio: null
+    };
+    this.statusConversa = "inicio";
+    this.canalAtendimento = "site"; // padrão: site, pode ser 'whatsapp', 'telegram', 'facebook', etc.
+    this.historicoMensagens = [];
+    this.produtosDisponiveis = [
+      { id: 1, nome: "Placa 3D Ondulada", preco: 45.90, prazoEntrega: 5, estoque: 120, categoria: "básica", peso: 0.8 },
+      { id: 2, nome: "Placa 3D Geométrica", preco: 52.50, prazoEntrega: 5, estoque: 80, categoria: "básica", peso: 0.8 },
+      { id: 3, nome: "Placa 3D Floral", preco: 58.90, prazoEntrega: 7, estoque: 65, categoria: "premium", peso: 0.9 },
+      { id: 4, nome: "Placa 3D Personalizada", preco: 89.90, prazoEntrega: 10, estoque: 30, categoria: "premium", peso: 1.1 },
+      { id: 5, nome: "Placa 3D Texturizada", preco: 62.90, prazoEntrega: 6, estoque: 50, categoria: "premium", peso: 0.9 },
+      { id: 6, nome: "Placa 3D Minimalista", preco: 48.90, prazoEntrega: 5, estoque: 70, categoria: "básica", peso: 0.8 },
+      { id: 7, nome: "Cola Especial para Gesso 3D", preco: 29.90, prazoEntrega: 3, estoque: 200, categoria: "acessório", peso: 0.5 },
+      { id: 8, nome: "Kit Instalação Completo", preco: 75.90, prazoEntrega: 3, estoque: 40, categoria: "acessório", peso: 1.2 }
+    ];
+    this.formasPagamento = [
+      { id: 1, nome: "Cartão de Crédito", parcelas: 12, desconto: 0 },
+      { id: 2, nome: "Cartão de Débito", parcelas: 1, desconto: 3 },
+      { id: 3, nome: "Boleto Bancário", parcelas: 1, desconto: 5 },
+      { id: 4, nome: "PIX", parcelas: 1, desconto: 10 },
+      { id: 5, nome: "Transferência Bancária", parcelas: 1, desconto: 7 }
+    ];
+    this.statusPedidos = [
+      "Aguardando pagamento",
+      "Pagamento confirmado",
+      "Em separação",
+      "Em produção",
+      "Pronto para envio",
+      "Enviado",
+      "Entregue",
+      "Cancelado"
+    ];
+    this.campanhasAtivas = [
+      { codigo: "BEMVINDO10", desconto: 10, validade: "2025-12-31" },
+      { codigo: "FRETE50", desconto: 50, tipo: "frete", validade: "2025-06-30" },
+      { codigo: "COMBO3D", desconto: 15, minProdutos: 3, validade: "2025-04-30" }
+    ];
+    this.pedidosSimulados = [
+      { id: "PED-2024102501", cliente: "cliente@exemplo.com", status: "Entregue", data: "2024-10-20", rastreio: "BR987654321" },
+      { id: "PED-2024102602", cliente: "cliente@exemplo.com", status: "Enviado", data: "2024-10-26", rastreio: "BR123456789" }
+    ];
+  }
+
+  // MÉTODOS PRINCIPAIS DO BOT
+
+  iniciarAtendimento(canal = "site") {
+    this.canalAtendimento = canal;
+    this.registrarInteracao("bot", this.adaptarMensagemParaCanal(this.getMensagemInicial(), canal));
+    return this.adaptarMensagemParaCanal(this.getMensagemInicial(), canal);
+  }
+
+  getMensagemInicial() {
+    return `
+      Olá! Bem-vindo à Gesso 3D Premium.
+      
+      Como posso ajudar você hoje?
+      
+      1️⃣ - Produtos e catálogo
+      2️⃣ - Solicitar orçamento
+      3️⃣ - Agendar visita técnica
+      4️⃣ - Dúvidas sobre instalação
+      5️⃣ - Prazos de entrega
+      6️⃣ - Rastrear meu pedido
+      7️⃣ - Métodos de pagamento
+      8️⃣ - Falar com atendente humano
+    `;
+  }
+
+  processarMensagem(mensagem) {
+    // Registrar mensagem do cliente
+    this.registrarInteracao("cliente", mensagem);
+    
+    // Converter mensagem para minúsculas e remover acentos para facilitar comparação
+    const mensagemProcessada = mensagem.toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    
+    // Verificar comandos universais
+    if (mensagemProcessada === "menu" || mensagemProcessada === "inicio" || mensagemProcessada === "voltar inicio") {
+      this.statusConversa = "inicio";
+      const resposta = this.getMensagemInicial();
+      this.registrarInteracao("bot", resposta);
+      return resposta;
+    }
+    
+    if (mensagemProcessada === "ajuda" || mensagemProcessada === "help") {
+      const resposta = this.getAjuda();
+      this.registrarInteracao("bot", resposta);
+      return resposta;
+    }
+    
+    if (mensagemProcessada.includes("falar") && mensagemProcessada.includes("humano") || 
+        mensagemProcessada.includes("atendente") || mensagemProcessada === "8") {
+      this.statusConversa = "atendimentoHumano";
+      const resposta = this.solicitarAtendimentoHumano();
+      this.registrarInteracao("bot", resposta);
+      return resposta;
+    }
+    
+    // Verificar status atual da conversa e processar de acordo
+    let resposta;
+    switch (this.statusConversa) {
+      case "inicio":
+        resposta = this.processarInicio(mensagem);
+        break;
+      case "produtos":
+        resposta = this.processarProdutos(mensagem);
+        break;
+      case "categoriaProdutos":
+        resposta = this.processarCategoriaProdutos(mensagem);
+        break;
+      case "orcamento":
+        resposta = this.processarOrcamento(mensagemProcessada);
+        break;
+      case "coletarDados":
+        resposta = this.coletarDados(mensagemProcessada);
+        break;
+      case "instalacao":
+        resposta = this.processarInstalacao(mensagemProcessada);
+        break;
+      case "rastrearPedido":
+        resposta = this.processarRastreamento(mensagemProcessada);
+        break;
+      case "pagamento":
+        resposta = this.processarPagamento(mensagemProcessada);
+        break;
+      case "finalizarPedido":
+        resposta = this.processarFinalizacaoPedido(mensagemProcessada);
+        break;
+      case "aplicarCupom":
+        resposta = this.processarCupom(mensagemProcessada);
+        break;
+      case "atendimentoHumano":
+        resposta = this.processarAtendimentoHumano(mensagemProcessada);
+        break;
+      case "finalizar":
+        resposta = this.finalizarAtendimento(mensagemProcessada);
+        break;
+      case "especificarQuantidades":
+        resposta = this.processarQuantidades(mensagemProcessada);
+        break;
+      default:
+        resposta = this.iniciarAtendimento();
+    }
+    
+    // Registrar resposta do bot
+    this.registrarInteracao("bot", resposta);
+    return resposta;
+  }
+
+  processarInicio(opcao) {
+    switch (opcao) {
+      case "1":
+        this.statusConversa = "categoriaProdutos";
+        return `
+          Catálogo de Placas de Gesso 3D:
+          
+          Selecione uma categoria para ver produtos:
+          
+          1 - Placas Básicas
+          2 - Placas Premium
+          3 - Acessórios para Instalação
+          4 - Ver todos os produtos
+          5 - Voltar ao menu principal
+        `;
+      case "2":
+        this.statusConversa = "orcamento";
+        this.pedidoAtual = {
+          id: this.gerarIdPedido(),
+          produtos: [],
+          quantidades: {},
+          orcamento: true,
+          instalacao: false,
+          dataEntrega: null,
+          status: "novo",
+          formaPagamento: null,
+          valorTotal: 0,
+          desconto: 0,
+          freteValor: 0
+        };
+        return `
+          Ótimo! Vamos preparar um orçamento personalizado para você.
+          
+          Qual tipo de placa de gesso 3D você tem interesse?
+          
+          ${this.listarProdutos()}
+          
+          Digite o número do produto ou "todos" para incluir todos no orçamento.
+        `;
+      case "3":
+        this.statusConversa = "coletarDados";
+        this.proximaEtapa = "agendarVisita";
+        return `
+          Para agendar uma visita técnica, precisamos de algumas informações.
+          
+          Por favor, informe seu nome completo:
+        `;
+      case "4":
+        this.statusConversa = "instalacao";
+        return `
+          Sobre instalação de placas de gesso 3D:
+          
+          • Oferecemos serviço de instalação profissional
+          • As placas são de fácil instalação para DIY (faça você mesmo)
+          • Temos tutoriais em vídeo disponíveis
+          • Vendemos cola especial para fixação
+          
+          Deseja:
+          
+          1 - Contratar nosso serviço de instalação
+          2 - Receber instruções para instalação DIY
+          3 - Adicionar kit de instalação ao carrinho
+          4 - Voltar ao menu principal
+        `;
+      case "5":
+        return `
+          Prazos de entrega:
+          
+          • Placas 3D padrão: 3-5 dias úteis
+          • Placas 3D especiais: 5-7 dias úteis
+          • Placas 3D personalizadas: 7-10 dias úteis
+          
+          Para regiões metropolitanas. Outras localidades podem ter prazo adicional de 2-5 dias úteis.
+          
+          Para um cálculo preciso do prazo, digite seu CEP:
+          (Ou digite "voltar" para retornar ao menu principal)
+        `;
+      case "6":
+        this.statusConversa = "rastrearPedido";
+        return `
+          Para rastrear seu pedido, por favor informe uma das opções:
+          
+          1 - Número do pedido (Ex: PED-2024102501)
+          2 - Código de rastreio
+          3 - E-mail usado na compra
+          
+          (Digite "voltar" para retornar ao menu principal)
+        `;
+      case "7":
+        this.statusConversa = "pagamento";
+        return this.listarFormasPagamento();
+      case "8":
+        this.statusConversa = "atendimentoHumano";
+        return this.solicitarAtendimentoHumano();
+      default:
+        // Processamento de linguagem natural para identificar intenção
+        if (this.contem(opcao, ["preço", "valor", "custo", "quanto", "custa"])) {
+          this.statusConversa = "produtos";
+          return this.listarProdutos();
+        }
+        if (this.contem(opcao, ["entrega", "prazo", "quando", "chega"])) {
+          return this.processarInicio("5");
+        }
+        if (this.contem(opcao, ["instalar", "instalação", "colocar", "fixar", "colar"])) {
+          return this.processarInicio("4");
+        }
+        if (this.contem(opcao, ["rastrear", "pedido", "status", "onde", "está"])) {
+          return this.processarInicio("6");
+        }
+        if (this.contem(opcao, ["pagar", "pagamento", "cartão", "boleto", "pix"])) {
+          return this.processarInicio("7");
+        }
+        if (this.contem(opcao, ["produtos", "catálogo", "ver", "modelos", "placas"])) {
+          return this.processarInicio("1");
+        }
+        if (this.contem(opcao, ["orçamento", "orcamento", "comprar", "quero"])) {
+          return this.processarInicio("2");
+        }
+        
+        return `
+          Desculpe, não entendi sua solicitação. Por favor, escolha uma das opções abaixo:
+          
+          ${this.getMensagemInicial()}
+          
+          Dica: você pode digitar "ajuda" a qualquer momento para ver comandos disponíveis.
+        `;
+    }
+  }
+
+  processarCategoriaProdutos(opcao) {
+    let categoria;
+    
+    switch (opcao) {
+      case "1":
+        categoria = "básica";
+        break;
+      case "2":
+        categoria = "premium";
+        break;
+      case "3":
+        categoria = "acessório";
+        break;
+      case "4":
+        this.statusConversa = "produtos";
+        return this.listarProdutos();
+      case "5":
+        this.statusConversa = "inicio";
+        return this.getMensagemInicial();
+      default:
+        return `
+          Opção inválida. Por favor, escolha uma categoria válida:
+          
+          1 - Placas Básicas
+          2 - Placas Premium
+          3 - Acessórios para Instalação
+          4 - Ver todos os produtos
+          5 - Voltar ao menu principal
+        `;
+    }
+    
+    const produtosFiltrados = this.produtosDisponiveis.filter(p => p.categoria === categoria);
+    
+    if (produtosFiltrados.length === 0) {
+      return `
+        Não encontramos produtos na categoria selecionada.
+        Por favor, escolha outra categoria:
+        
+        1 - Placas Básicas
+        2 - Placas Premium
+        3 - Acessórios para Instalação
+        4 - Ver todos os produtos
+        5 - Voltar ao menu principal
+      `;
+    }
+    
+    let resposta = `Produtos na categoria selecionada:\n\n`;
+    
+    produtosFiltrados.forEach(produto => {
+      resposta += `${produto.id} - ${produto.nome}: R$ ${produto.preco.toFixed(2)} (entrega em até ${produto.prazoEntrega} dias úteis)\n`;
+    });
+    
+    resposta += "\nDigite o número do produto para mais detalhes ou 'voltar' para retornar.";
+    this.statusConversa = "produtos";
+    
+    return resposta;
+  }
+
+  listarProdutos() {
+    let resposta = "Nossas placas de gesso 3D disponíveis:\n\n";
+    
+    this.produtosDisponiveis.forEach(produto => {
+      resposta += `${produto.id} - ${produto.nome}: R$ ${produto.preco.toFixed(2)} (entrega em até ${produto.prazoEntrega} dias úteis)\n`;
+    });
+    
+    resposta += "\nDigite o número do produto para mais detalhes ou 'voltar' para retornar ao menu principal.";
+    
+    return resposta;
+  }
+
+  processarProdutos(opcao) {
+    if (opcao.toLowerCase() === "voltar") {
+      this.statusConversa = "inicio";
+      return this.getMensagemInicial();
+    }
+    
+    const produtoId = parseInt(opcao);
+    const produto = this.produtosDisponiveis.find(p => p.id === produtoId);
+    
+    if (produto) {
+      return `
+        Detalhes do Produto: ${produto.nome}
+        
+        Preço: R$ ${produto.preco.toFixed(2)}
+        Prazo de Entrega: ${produto.prazoEntrega} dias úteis
+        Material: Gesso de alta qualidade
+        Dimensões: 50cm x 50cm
+        Peso: ${produto.peso} kg
+        Resistente à umidade: Sim
+        Pintura: Aceita qualquer tipo de tinta
+        Disponibilidade: ${produto.estoque > 10 ? 'Em estoque' : (produto.estoque > 0 ? 'Estoque limitado' : 'Sob encomenda')}
+        
+        Deseja:
+        
+        1 - Adicionar ao orçamento
+        2 - Ver imagens do produto (Enviaremos pelo WhatsApp)
+        3 - Ver outro produto
+        4 - Voltar ao menu principal
+      `;
+    } else {
+      return `
+        Produto não encontrado. Por favor, escolha um número válido:
+        
+        ${this.listarProdutos()}
+      `;
+    }
+  }
+
+  processarOrcamento(mensagem) {
+    if (mensagem === "todos") {
+      this.pedidoAtual.produtos = [...this.produtosDisponiveis.map(p => ({...p}))];
+      this.pedidoAtual.quantidades = {};
+      this.produtosDisponiveis.forEach(p => {
+        this.pedidoAtual.quantidades[p.id] = 1;
+      });
+      
+      return `
+        Adicionamos todos os modelos ao seu orçamento!
+        
+        Gostaria de especificar a quantidade de cada produto?
+        
+        1 - Sim, quero especificar as quantidades
+        2 - Não, manter uma unidade de cada
+        3 - Prosseguir com os dados para o orçamento
+      `;
+    }
+    
+    if (mensagem === "1" && this.ultimaPergunta === "especificar_quantidade") {
+      this.statusConversa = "especificarQuantidades";
+      this.produtoAtualIndex = 0;
+      return this.solicitarQuantidadeProduto();
+    }
+    
+    if (mensagem === "2" && this.ultimaPergunta === "especificar_quantidade") {
+      // Manter uma unidade de cada
+      this.statusConversa = "coletarDados";
+      this.proximaEtapa = "finalizarOrcamento";
+      return `
+        Mantivemos uma unidade de cada produto selecionado.
+        
+        Agora, precisamos de alguns dados para enviar seu orçamento completo.
+        Por favor, informe seu nome completo:
+      `;
+    }
+    
+    if (mensagem === "3" && this.ultimaPergunta === "especificar_quantidade") {
+      this.statusConversa = "coletarDados";
+      this.proximaEtapa = "finalizarOrcamento";
+      return `
+        Ótimo! Vamos prosseguir com seu orçamento.
+        
+        Por favor, informe seu nome completo:
+      `;
+    }
+    
+    const produtoId = parseInt(mensagem);
+    const produto = this.produtosDisponiveis.find(p => p.id === produtoId);
+    
+    if (produto) {
+      // Verificar se o produto já existe no pedido
+      const produtoExistente = this.pedidoAtual.produtos.find(p => p.id === produto.id);
+      if (!produtoExistente) {
+        this.pedidoAtual.produtos.push({...produto});
+        this.pedidoAtual.quantidades[produto.id] = 1;
+      } else {
+        // Se já existe, incrementa a quantidade
+        this.pedidoAtual.quantidades[produto.id] += 1;
+      }
+      
+      return `
+        Produto "${produto.nome}" adicionado ao orçamento!
+        Quantidade atual: ${this.pedidoAtual.quantidades[produto.id]} unidade(s)
+        
+        Deseja adicionar mais algum produto?
+        
+        Digite o número do produto, "todos" para todos os produtos, ou "finalizar" para concluir o orçamento.
+        
+        ${this.listarProdutos()}
+      `;
+    } else if (mensagem === "finalizar") {
+      if (this.pedidoAtual.produtos.length === 0) {
+        return `
+          Você ainda não selecionou nenhum produto para o orçamento.
+          Por favor, escolha pelo menos um produto:
+          
+          ${this.listarProdutos()}
+        `;
+      }
+      
+      // Antes de ir para dados, verificar se quer especificar quantidades
+      this.ultimaPergunta = "especificar_quantidade";
+      return `
+        Você selecionou ${this.pedidoAtual.produtos.length} produto(s) para seu orçamento.
+        
+        Gostaria de especificar a quantidade de cada produto?
+        
+        1 - Sim, quero especificar as quantidades
+        2 - Não, manter as quantidades atuais
+        3 - Prosseguir com os dados para o orçamento
+      `;
+    } else {
+      return `
+        Opção inválida. Por favor, escolha um número de produto válido, digite "todos" ou "finalizar":
+        
+        ${this.listarProdutos()}
+      `;
+    }
+  }
+
+  solicitarQuantidadeProduto() {
+    if (this.produtoAtualIndex >= this.pedidoAtual.produtos.length) {
+      this.statusConversa = "coletarDados";
+      this.proximaEtapa = "finalizarOrcamento";
+      return `
+        Quantidades atualizadas com sucesso!
+        
+        Agora, precisamos de alguns dados para enviar seu orçamento completo.
+        Por favor, informe seu nome completo:
+      `;
+    }
+    
+    const produtoAtual = this.pedidoAtual.produtos[this.produtoAtualIndex];
+    return `
+      Produto: ${produtoAtual.nome}
+      Quantidade atual: ${this.pedidoAtual.quantidades[produtoAtual.id]}
+      
+      Por favor, digite a nova quantidade desejada (ou "pular" para manter a atual):
+    `;
+  }
+
+  processarQuantidades(mensagem) {
+    if (mensagem.toLowerCase() === "pular") {
+      this.produtoAtualIndex++;
+      return this.solicitarQuantidadeProduto();
+    }
+    
+    const quantidade = parseInt(mensagem);
+    if (isNaN(quantidade) || quantidade < 1) {
+      return `
+        Por favor, digite um número válido maior que zero.
+        Ou digite "pular" para manter a quantidade atual.
+      `;
+    }
+    
+    const produtoAtual = this.pedidoAtual.produtos[this.produtoAtualIndex];
+    this.pedidoAtual.quantidades[produtoAtual.id] = quantidade;
+    this.produtoAtualIndex++;
+    
+    return this.solicitarQuantidadeProduto();
+  }
+
+  coletarDados(mensagem) {
+    // Etapas de coleta: nome -> email -> telefone -> cep -> endereço completo -> finalizar
+    if (!this.dadosCliente.nome) {
+      this.dadosCliente.nome = mensagem;
+      return "Obrigado! Agora, por favor, informe seu e-mail:";
+    } else if (!this.dadosCliente.email) {
+      this.dadosCliente.email = mensagem;
+      return "Ótimo! Agora, informe seu telefone com DDD (importante para contato via WhatsApp):";
+    } else if (!this.dadosCliente.telefone) {
+      this.dadosCliente.telefone = mensagem;
+      return "Agora, informe seu CEP para calcularmos o frete:";
+    } else if (!this.dadosCliente.cep) {
+      this.dadosCliente.cep = mensagem;
+      
+      // Simulação de consulta de CEP
+      const cepValido = /^\d{5}-?\d{3}$/.test(mensagem);
+      if (!cepValido) {
+        this.dadosCliente.cep = null;
+        return "CEP inválido. Por favor, informe um CEP no formato 00000-000 ou 00000000:";
+      }
+      
+      // Simular obtenção de cidade e estado pelo CEP
+      this.dadosCliente.cidade = "São Paulo";
+      this.dadosCliente.estado = "SP";
+      
+      return `CEP localizado: ${this.dadosCliente.cidade}/${this.dadosCliente.estado}. Por favor, complete seu endereço (Rua, número, complemento, bairro):`;
+    } else if (!this.dadosCliente.endereco) {
+      this.dadosCliente.endereco = mensagem;
+      
+      // Verificar próxima etapa após coleta de dados
+      if (this.proximaEtapa === "finalizarOrcamento") {
+        return this.calcularFrete();
+      } else if (this.proximaEtapa === "agendarVisita") {
+        return this.agendarVisita();
+      } else if (this.proximaEtapa === "finalizarPedido") {
+        return this.processarFormaPagamento();
+      }
+    }
+    
+    return "Dados coletados com sucesso!";
+  }
+
+  calcularFrete() {
+    // Simulação de cálculo de frete
+    const cep = this.dadosCliente.cep;
+    let valorFrete = 0;
+    
+    // Calcular peso total
+    let pesoTotal = 0;
+    this.pedidoAtual.produtos.forEach(produto => {
+      pesoTotal += produto.peso * this.pedidoAtual.quantidades[produto.id];
+    });
+    
+    // Cálculo simulado baseado no CEP e peso
+    if (cep.startsWith("0") || cep.startsWith("1")) {
+      // Região Sudeste
+      valorFrete = 25 + (pesoTotal * 2);
+    } else if (cep.startsWith("2") || cep.startsWith("3")) {
+      // Região Sul
+      valorFrete = 35 + (pesoTotal * 2.5);
+    } else {
+      // Outras regiões
+      valorFrete = 45 + (pesoTotal * 3);
+    }
+    
+    this.pedidoAtual.freteValor = valorFrete;
+    
+    this.statusConversa = "finalizarPedido";
+    
+    return `
+      Frete calculado: R$ ${valorFrete.toFixed(2)}
+      
+      Você tem um cupom de desconto?
+      
+      1 - Sim, tenho um cupom
+      2 - Não, prosseguir para pagamento
+    `;
+  }
+
+  processarCupom(mensagem) {
+    // Verificar se é um código de cupom válido
+    const cupom = this.campanhasAtivas.find(c => c.codigo === mensagem.toUpperCase());
+    
+    if (cupom) {
+      // Verificar validade
+      const hoje = new Date();
+      const validade = new Date(cupom.validade);
+      
+      if (hoje > validade) {
+        return `
+          Desculpe, o cupom ${cupom.codigo} está expirado.
+          
+          Deseja tentar outro cupom?
+          
+          1 - Sim, tentar outro cupom
+          2 - Não, prosseguir para pagamento
+        `;
+      }
+      
+      // Verificar requisitos específicos
+      if (cupom.minProdutos && this.pedidoAtual.produtos.length < cupom.minProdutos) {
+        return `
+          Este cupom requer a compra de pelo menos ${cupom.minProdutos} produtos diferentes.
+          
+          Você selecionou apenas ${this.pedidoAtual.produtos.length} produto(s).
+          
+          1 - Adicionar mais produtos
+          2 - Tentar outro cupom
+          3 - Prosseguir sem cupom
+        `;
+      }
+      
+      // Aplicar desconto
+      if (cupom.tipo === "frete") {
+        // Desconto no frete
+        const descontoFrete = (this.pedidoAtual.freteValor * cupom.desconto) / 100;
+        this.pedidoAtual.freteValor -= descontoFrete;
+        
+        this.statusConversa = "finalizarPedido";
+        return `
+          Cupom ${cupom.codigo} aplicado com sucesso!
+          
+          Você recebeu ${cupom.desconto}% de desconto no frete.
+          Novo valor do frete: R$ ${this.pedidoAtual.freteValor.toFixed(2)}
+          
+          Prosseguir para pagamento?
+          
+          1 - Sim, ir para pagamento
+          2 - Não, voltar ao menu principal
+        `;
+      } else {
+        // Desconto no valor total
+        this.pedidoAtual.desconto = cupom.desconto;
+        
+        this.statusConversa = "finalizarPedido";
+        return `
+          Cupom ${cupom.codigo} aplicado com sucesso!
+          
+          Você recebeu ${cupom.desconto}% de desconto no valor total dos produtos.
+          
+          Prosseguir para pagamento
